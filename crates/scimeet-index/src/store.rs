@@ -1,11 +1,21 @@
-use rusqlite::{params, Connection, OptionalExtension};
+use arrow_array::cast::AsArray;
+use arrow_array::types::Float32Type;
+use arrow_array::ArrayRef;
+use arrow_array::{FixedSizeListArray, Float32Array, RecordBatch, StringArray};
+use arrow_schema::{DataType, Field, Schema};
+use futures::TryStreamExt;
+use lancedb::index::Index;
+use lancedb::query::{ExecutableQuery, QueryBase};
+use lancedb::{connect, DistanceType, Table};
 use scimeet_core::{ChunkMeta, ScimeetError};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::path::Path;
+use std::sync::Arc;
 
 pub struct VectorStore {
-    conn: Connection,
+    table: Arc<Table>,
+    dim: usize,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -16,47 +26,7 @@ pub struct IndexedChunk {
     pub score: f32,
 }
 
-fn f32s_to_blob(v: &[f32]) -> Vec<u8> {
-    let mut b = Vec::with_capacity(v.len() * 4);
-    for x in v {
-        b.extend_from_slice(&x.to_le_bytes());
-    }
-    b
-}
-
-fn blob_to_f32s(blob: &[u8]) -> Result<Vec<f32>, ScimeetError> {
-    if blob.len() % 4 != 0 {
-        return Err(ScimeetError::Parse("bad embedding blob".to_string()));
-    }
-    let n = blob.len() / 4;
-    let mut v = Vec::with_capacity(n);
-    for i in 0..n {
-        let start = i * 4;
-        let arr: [u8; 4] = blob[start..start + 4].try_into().unwrap();
-        v.push(f32::from_le_bytes(arr));
-    }
-    Ok(v)
-}
-
-fn cosine(a: &[f32], b: &[f32]) -> f32 {
-    if a.len() != b.len() || a.is_empty() {
-        return 0.0;
-    }
-    let mut dot = 0.0f32;
-    let mut na = 0.0f32;
-    let mut nb = 0.0f32;
-    for i in 0..a.len() {
-        dot += a[i] * b[i];
-        na += a[i] * a[i];
-        nb += b[i] * b[i];
-    }
-    let d = na.sqrt() * nb.sqrt();
-    if d == 0.0 {
-        0.0
-    } else {
-        dot / d
-    }
-}
+const TABLE_NAME: &str = "chunks";
 
 fn content_hash(text: &str) -> String {
     let mut h = Sha256::new();
@@ -64,102 +34,304 @@ fn content_hash(text: &str) -> String {
     format!("{:x}", h.finalize())
 }
 
+fn chunk_schema(dim: usize) -> Arc<Schema> {
+    let vec_item = Field::new("item", DataType::Float32, true);
+    Arc::new(Schema::new(vec![
+        Field::new("id", DataType::Utf8, false),
+        Field::new("content_hash", DataType::Utf8, false),
+        Field::new("doc_id", DataType::Utf8, false),
+        Field::new("text", DataType::Utf8, false),
+        Field::new("meta_json", DataType::Utf8, false),
+        Field::new(
+            "vector",
+            DataType::FixedSizeList(Arc::new(vec_item), dim as i32),
+            false,
+        ),
+    ]))
+}
+
+fn record_batch_from_row(
+    id: &str,
+    hash: &str,
+    doc_id: &str,
+    text: &str,
+    meta_json: &str,
+    embedding: &[f32],
+    dim: usize,
+) -> Result<RecordBatch, ScimeetError> {
+    if embedding.len() != dim {
+        return Err(ScimeetError::Parse(format!(
+            "embedding dim {} != expected {}",
+            embedding.len(),
+            dim
+        )));
+    }
+    let flat: ArrayRef = Arc::new(Float32Array::from_iter_values(
+        embedding.iter().copied(),
+    ));
+    let list = FixedSizeListArray::try_new(
+        Arc::new(Field::new("item", DataType::Float32, true)),
+        dim as i32,
+        flat,
+        None,
+    )
+    .map_err(|e| ScimeetError::LanceDb(e.to_string()))?;
+    let schema = chunk_schema(dim);
+    RecordBatch::try_new(
+        schema,
+        vec![
+            Arc::new(StringArray::from(vec![id.to_string()])),
+            Arc::new(StringArray::from(vec![hash.to_string()])),
+            Arc::new(StringArray::from(vec![doc_id.to_string()])),
+            Arc::new(StringArray::from(vec![text.to_string()])),
+            Arc::new(StringArray::from(vec![meta_json.to_string()])),
+            Arc::new(list),
+        ],
+    )
+    .map_err(|e| ScimeetError::LanceDb(e.to_string()))
+}
+
+fn record_batch_from_rows(
+    rows: Vec<(String, String, String, String, String, Vec<f32>)>,
+    dim: usize,
+) -> Result<RecordBatch, ScimeetError> {
+    let n = rows.len();
+    let mut flat: Vec<f32> = Vec::with_capacity(n * dim);
+    for r in &rows {
+        if r.5.len() != dim {
+            return Err(ScimeetError::Parse(format!(
+                "embedding dim {} != expected {}",
+                r.5.len(),
+                dim
+            )));
+        }
+        flat.extend_from_slice(&r.5);
+    }
+    let flat_arr: ArrayRef = Arc::new(Float32Array::from(flat));
+    let list = FixedSizeListArray::try_new(
+        Arc::new(Field::new("item", DataType::Float32, true)),
+        dim as i32,
+        flat_arr,
+        None,
+    )
+    .map_err(|e| ScimeetError::LanceDb(e.to_string()))?;
+    let schema = chunk_schema(dim);
+    RecordBatch::try_new(
+        schema,
+        vec![
+            Arc::new(StringArray::from_iter(
+                rows.iter().map(|r| Some(r.0.clone())),
+            )),
+            Arc::new(StringArray::from_iter(
+                rows.iter().map(|r| Some(r.1.clone())),
+            )),
+            Arc::new(StringArray::from_iter(
+                rows.iter().map(|r| Some(r.2.clone())),
+            )),
+            Arc::new(StringArray::from_iter(
+                rows.iter().map(|r| Some(r.3.clone())),
+            )),
+            Arc::new(StringArray::from_iter(
+                rows.iter().map(|r| Some(r.4.clone())),
+            )),
+            Arc::new(list),
+        ],
+    )
+    .map_err(|e| ScimeetError::LanceDb(e.to_string()))
+}
+
+fn map_err(e: impl std::fmt::Display) -> ScimeetError {
+    ScimeetError::LanceDb(e.to_string())
+}
+
 impl VectorStore {
-    pub fn open(path: &Path) -> Result<Self, ScimeetError> {
+    pub async fn open(path: &Path, dim: usize) -> Result<Self, ScimeetError> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(ScimeetError::Io)?;
         }
-        let conn = Connection::open(path).map_err(|e| ScimeetError::Sqlite(e.to_string()))?;
-        conn.execute_batch(
-            r#"
-            CREATE TABLE IF NOT EXISTS chunks (
-                id TEXT PRIMARY KEY,
-                content_hash TEXT NOT NULL UNIQUE,
-                doc_id TEXT NOT NULL,
-                text TEXT NOT NULL,
-                meta_json TEXT NOT NULL,
-                embedding BLOB NOT NULL
-            );
-            CREATE INDEX IF NOT EXISTS idx_chunks_doc ON chunks(doc_id);
-            "#,
-        )
-        .map_err(|e| ScimeetError::Sqlite(e.to_string()))?;
-        Ok(Self { conn })
+        std::fs::create_dir_all(path).map_err(ScimeetError::Io)?;
+        let uri = path.to_string_lossy();
+        let conn = connect(uri.as_ref())
+            .execute()
+            .await
+            .map_err(map_err)?;
+        let names = conn
+            .table_names()
+            .execute()
+            .await
+            .map_err(map_err)?;
+        let table = if names.iter().any(|n| n == TABLE_NAME) {
+            conn.open_table(TABLE_NAME)
+                .execute()
+                .await
+                .map_err(map_err)?
+        } else {
+            let schema = chunk_schema(dim);
+            conn.create_empty_table(TABLE_NAME, schema)
+                .execute()
+                .await
+                .map_err(map_err)?
+        };
+        Ok(Self {
+            table: Arc::new(table),
+            dim,
+        })
     }
 
-    pub fn upsert_chunk(
+    pub async fn upsert_chunk(
         &self,
         text: &str,
         meta: &ChunkMeta,
         embedding: &[f32],
     ) -> Result<bool, ScimeetError> {
         let h = content_hash(text);
-        let exists: Option<String> = self
-            .conn
-            .query_row(
-                "SELECT id FROM chunks WHERE content_hash = ?1",
-                params![h],
-                |r| r.get(0),
-            )
-            .optional()
-            .map_err(|e| ScimeetError::Sqlite(e.to_string()))?;
-        if exists.is_some() {
+        let existing = self
+            .table
+            .query()
+            .only_if(format!("content_hash = '{h}'"))
+            .limit(1)
+            .execute()
+            .await
+            .map_err(map_err)?
+            .try_collect::<Vec<_>>()
+            .await
+            .map_err(map_err)?;
+        if !existing.is_empty() && existing.iter().any(|b| b.num_rows() > 0) {
             return Ok(false);
         }
         let id = format!("{}_{}", meta.document_id.0, meta.chunk_index);
         let meta_json = serde_json::to_string(meta).map_err(ScimeetError::Json)?;
-        let blob = f32s_to_blob(embedding);
-        self.conn
-            .execute(
-                r#"INSERT INTO chunks (id, content_hash, doc_id, text, meta_json, embedding)
-                   VALUES (?1, ?2, ?3, ?4, ?5, ?6)"#,
-                params![
-                    id,
-                    h,
-                    meta.document_id.0,
-                    text,
-                    meta_json,
-                    blob,
-                ],
-            )
-            .map_err(|e| ScimeetError::Sqlite(e.to_string()))?;
+        let batch = record_batch_from_row(
+            &id,
+            &h,
+            &meta.document_id.0,
+            text,
+            &meta_json,
+            embedding,
+            self.dim,
+        )?;
+        self.table
+            .add(vec![batch])
+            .execute()
+            .await
+            .map_err(map_err)?;
         Ok(true)
     }
 
-    pub fn search(&self, query: &[f32], k: usize) -> Result<Vec<IndexedChunk>, ScimeetError> {
-        let mut stmt = self
-            .conn
-            .prepare("SELECT id, text, meta_json, embedding FROM chunks")
-            .map_err(|e| ScimeetError::Sqlite(e.to_string()))?;
-        let rows = stmt
-            .query_map([], |r| {
-                Ok((
-                    r.get::<_, String>(0)?,
-                    r.get::<_, String>(1)?,
-                    r.get::<_, String>(2)?,
-                    r.get::<_, Vec<u8>>(3)?,
-                ))
-            })
-            .map_err(|e| ScimeetError::Sqlite(e.to_string()))?;
-        let mut scored: Vec<(f32, String, String, ChunkMeta)> = Vec::new();
-        for row in rows {
-            let (id, text, meta_json, emb_blob) =
-                row.map_err(|e| ScimeetError::Sqlite(e.to_string()))?;
-            let emb = blob_to_f32s(&emb_blob)?;
-            let s = cosine(query, &emb);
-            let meta: ChunkMeta = serde_json::from_str(&meta_json).map_err(ScimeetError::Json)?;
-            scored.push((s, id, text, meta));
-        }
-        scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
-        scored.truncate(k);
-        Ok(scored
-            .into_iter()
-            .map(|(score, id, text, meta)| IndexedChunk {
+    pub async fn upsert_chunks_batch(
+        &self,
+        items: Vec<(String, ChunkMeta, Vec<f32>)>,
+    ) -> Result<usize, ScimeetError> {
+        let mut rows: Vec<(String, String, String, String, String, Vec<f32>)> = Vec::new();
+        for (text, meta, emb) in items {
+            let h = content_hash(&text);
+            let existing = self
+                .table
+                .query()
+                .only_if(format!("content_hash = '{h}'"))
+                .limit(1)
+                .execute()
+                .await
+                .map_err(map_err)?
+                .try_collect::<Vec<_>>()
+                .await
+                .map_err(map_err)?;
+            if !existing.is_empty() && existing.iter().any(|b| b.num_rows() > 0) {
+                continue;
+            }
+            let id = format!("{}_{}", meta.document_id.0, meta.chunk_index);
+            let meta_json = serde_json::to_string(&meta).map_err(ScimeetError::Json)?;
+            rows.push((
                 id,
+                h,
+                meta.document_id.0,
                 text,
-                meta,
-                score,
-            })
-            .collect())
+                meta_json,
+                emb,
+            ));
+        }
+        if rows.is_empty() {
+            return Ok(0);
+        }
+        let batch = record_batch_from_rows(rows, self.dim)?;
+        let n = batch.num_rows();
+        self.table
+            .add(vec![batch])
+            .execute()
+            .await
+            .map_err(map_err)?;
+        Ok(n)
+    }
+
+    pub async fn search(
+        &self,
+        query: &[f32],
+        k: usize,
+    ) -> Result<Vec<IndexedChunk>, ScimeetError> {
+        if query.len() != self.dim {
+            return Err(ScimeetError::Parse(format!(
+                "query embedding dim {} != expected {}",
+                query.len(),
+                self.dim
+            )));
+        }
+        let batches = self
+            .table
+            .query()
+            .nearest_to(query)
+            .map_err(map_err)?
+            .distance_type(DistanceType::Cosine)
+            .limit(k)
+            .execute()
+            .await
+            .map_err(map_err)?
+            .try_collect::<Vec<_>>()
+            .await
+            .map_err(map_err)?;
+        let mut out: Vec<IndexedChunk> = Vec::new();
+        for batch in batches {
+            let id_arr = batch
+                .column_by_name("id")
+                .ok_or_else(|| ScimeetError::Parse("missing id".to_string()))?
+                .as_string::<i32>();
+            let text_arr = batch
+                .column_by_name("text")
+                .ok_or_else(|| ScimeetError::Parse("missing text".to_string()))?
+                .as_string::<i32>();
+            let meta_arr = batch
+                .column_by_name("meta_json")
+                .ok_or_else(|| ScimeetError::Parse("missing meta_json".to_string()))?
+                .as_string::<i32>();
+            let dist_arr = batch
+                .column_by_name("_distance")
+                .ok_or_else(|| ScimeetError::Parse("missing _distance".to_string()))?
+                .as_primitive::<Float32Type>();
+            for i in 0..batch.num_rows() {
+                let dist = dist_arr.value(i);
+                let score = (1.0 - dist).max(0.0);
+                let meta: ChunkMeta = serde_json::from_str(meta_arr.value(i))
+                    .map_err(ScimeetError::Json)?;
+                out.push(IndexedChunk {
+                    id: id_arr.value(i).to_string(),
+                    text: text_arr.value(i).to_string(),
+                    meta,
+                    score,
+                });
+            }
+        }
+        Ok(out)
+    }
+
+    pub async fn create_vector_index(&self) -> Result<(), ScimeetError> {
+        self.table
+            .create_index(&["vector"], Index::Auto)
+            .execute()
+            .await
+            .map_err(map_err)?;
+        Ok(())
+    }
+
+    pub fn dim(&self) -> usize {
+        self.dim
     }
 }

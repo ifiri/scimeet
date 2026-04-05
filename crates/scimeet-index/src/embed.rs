@@ -51,6 +51,13 @@ impl OllamaEmbeddings {
             .json()
             .await
             .map_err(|e| ScimeetError::Ollama(e.to_string()))?;
+        if parsed.embedding.len() != self.config.embed_dim {
+            return Err(ScimeetError::Ollama(format!(
+                "embedding length {} does not match embed_dim {}",
+                parsed.embedding.len(),
+                self.config.embed_dim
+            )));
+        }
         Ok(parsed.embedding)
     }
 

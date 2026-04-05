@@ -13,6 +13,7 @@ pub struct ScimeetConfig {
     pub data_dir: PathBuf,
     pub ncbi_api_key: Option<String>,
     pub request_timeout_secs: u64,
+    pub embed_dim: usize,
 }
 
 impl Default for ScimeetConfig {
@@ -28,13 +29,18 @@ impl Default for ScimeetConfig {
             data_dir: PathBuf::from("data"),
             ncbi_api_key: std::env::var("NCBI_API_KEY").ok(),
             request_timeout_secs: 120,
+            embed_dim: 768,
         }
     }
 }
 
 impl ScimeetConfig {
+    pub fn lancedb_path(&self) -> PathBuf {
+        self.data_dir.join("lancedb")
+    }
+
     pub fn index_path(&self) -> PathBuf {
-        self.data_dir.join("index.sqlite")
+        self.lancedb_path()
     }
 
     pub fn from_env_overrides(mut self) -> Self {
@@ -43,6 +49,11 @@ impl ScimeetConfig {
         }
         if let Ok(v) = std::env::var("SCIMEET_DATA_DIR") {
             self.data_dir = PathBuf::from(v);
+        }
+        if let Ok(v) = std::env::var("SCIMEET_EMBED_DIM") {
+            if let Ok(n) = v.parse::<usize>() {
+                self.embed_dim = n;
+            }
         }
         self
     }

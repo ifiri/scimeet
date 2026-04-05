@@ -8,8 +8,8 @@ pub enum ScimeetError {
     Io(#[from] std::io::Error),
     #[error("json: {0}")]
     Json(#[from] serde_json::Error),
-    #[error("sqlite: {0}")]
-    Sqlite(String),
+    #[error("lancedb: {0}")]
+    LanceDb(String),
     #[error("ollama: {0}")]
     Ollama(String),
     #[error("parse: {0}")]

@@ -72,7 +72,7 @@ impl RagEngine {
         top_k: usize,
     ) -> Result<Vec<IndexedChunk>, ScimeetError> {
         let qvec = self.embed_query(question).await?;
-        store.search(&qvec, top_k)
+        store.search(&qvec, top_k).await
     }
 
     pub async fn answer(
