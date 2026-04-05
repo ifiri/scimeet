@@ -1,0 +1,19 @@
+[package]
+name = "scimeet-cli"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "scimeet"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+scimeet-core = { path = "../scimeet-core" }
+scimeet-index = { path = "../scimeet-index" }
+scimeet-ingest = { path = "../scimeet-ingest" }
+scimeet-rag = { path = "../scimeet-rag" }
+scimeet-sources = { path = "../scimeet-sources" }
+scimeet-translate = { path = "../scimeet-translate" }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }

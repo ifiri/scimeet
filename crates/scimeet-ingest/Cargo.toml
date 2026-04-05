@@ -1,0 +1,10 @@
+[package]
+name = "scimeet-ingest"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+scimeet-core = { path = "../scimeet-core" }
+scimeet-translate = { path = "../scimeet-translate" }
+sha2 = "0.10"
