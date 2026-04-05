@@ -1,0 +1,15 @@
+[workspace]
+members = [
+    "crates/scimeet-core",
+    "crates/scimeet-translate",
+    "crates/scimeet-index",
+    "crates/scimeet-sources",
+    "crates/scimeet-ingest",
+    "crates/scimeet-rag",
+    "crates/scimeet-cli",
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+license = "MIT OR Apache-2.0"
