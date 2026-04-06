@@ -1,6 +1,7 @@
 use reqwest::Client;
 use scimeet_core::{ScimeetConfig, ScimeetError};
 use serde::{Deserialize, Serialize};
+use tracing::instrument;
 
 pub struct OllamaTranslator {
     client: Client,
@@ -31,14 +32,11 @@ struct ChatResponseMessage {
 }
 
 impl OllamaTranslator {
-    pub fn new(config: ScimeetConfig) -> Result<Self, ScimeetError> {
-        let client = Client::builder()
-            .timeout(std::time::Duration::from_secs(config.request_timeout_secs))
-            .build()
-            .map_err(|e| ScimeetError::Http(e.to_string()))?;
-        Ok(Self { client, config })
+    pub fn new(config: ScimeetConfig, client: Client) -> Self {
+        Self { client, config }
     }
 
+    #[instrument(skip_all, fields(model = %self.config.translate_model))]
     pub async fn to_english(&self, text: &str) -> Result<String, ScimeetError> {
         let url = format!("{}/api/chat", self.config.ollama_base.trim_end_matches('/'));
         let body = ChatRequest {

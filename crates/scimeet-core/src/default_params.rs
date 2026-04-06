@@ -1,0 +1,14 @@
+pub const OLLAMA_BASE: &str = "http://127.0.0.1:11434";
+pub const EMBED_MODEL: &str = "nomic-embed-text";
+pub const CHAT_MODEL: &str = "llama3.1:8b";
+pub const TRANSLATE_MODEL: &str = "llama3.1:8b";
+pub const TRANSLATE_ON_QUERY: bool = true;
+pub const TRANSLATE_ON_INGEST: bool = false;
+pub const TRANSLATE_FALLBACK_TO_ORIGINAL: bool = true;
+pub const DATA_DIR: &str = "data";
+pub const REQUEST_TIMEOUT_SECS: u64 = 120;
+pub const CONNECT_TIMEOUT_SECS: u64 = 30;
+pub const EMBED_DIM: usize = 768;
+pub const HTTP_POOL_MAX_IDLE_PER_HOST: usize = 8;
+pub const HTTP_POOL_IDLE_TIMEOUT_SECS: u64 = 90;
+pub const HTTP_USER_AGENT: &str = "scimeet/0.1";

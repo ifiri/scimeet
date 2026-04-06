@@ -21,13 +21,8 @@ struct EsearchResult {
 }
 
 impl PubMedSource {
-    pub fn new(api_key: Option<String>, timeout_secs: u64) -> Result<Self, ScimeetError> {
-        let client = Client::builder()
-            .timeout(std::time::Duration::from_secs(timeout_secs))
-            .user_agent("scimeet/0.1 (mailto:local)")
-            .build()
-            .map_err(|e| ScimeetError::Http(e.to_string()))?;
-        Ok(Self { client, api_key })
+    pub fn new(client: Client, api_key: Option<String>) -> Self {
+        Self { client, api_key }
     }
 
     async fn esearch(&self, term: &str, retmax: usize) -> Result<Vec<String>, ScimeetError> {
@@ -146,5 +141,49 @@ impl SourceAdapter for PubMedSource {
         tokio::time::sleep(std::time::Duration::from_millis(350)).await;
         let xml = self.efetch(&ids).await?;
         parse_pubmed_xml(&xml)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use scimeet_core::SourceKind;
+
+    const SAMPLE_XML: &str = r#"<?xml version="1.0"?>
+<PubmedArticleSet>
+  <PubmedArticle>
+    <MedlineCitation>
+      <PMID Version="1">12345678</PMID>
+      <Article>
+        <ArticleTitle>Test Article</ArticleTitle>
+        <Abstract>
+          <AbstractText>First block.</AbstractText>
+          <AbstractText>Second block.</AbstractText>
+        </Abstract>
+      </Article>
+    </MedlineCitation>
+    <PubmedData>
+      <ArticleIdList>
+        <ArticleId IdType="doi">10.1000/test.doi</ArticleId>
+      </ArticleIdList>
+    </PubmedData>
+  </PubmedArticle>
+</PubmedArticleSet>
+"#;
+
+    #[test]
+    fn parse_pubmed_xml_extracts_article() {
+        let docs = parse_pubmed_xml(SAMPLE_XML).unwrap();
+        assert_eq!(docs.len(), 1);
+        assert_eq!(docs[0].id.0, "pubmed:12345678");
+        assert_eq!(docs[0].source, SourceKind::PubMed);
+        assert_eq!(docs[0].title, "Test Article");
+        assert_eq!(docs[0].abstract_text, "First block.\n\nSecond block.");
+        assert_eq!(docs[0].pmid.as_deref(), Some("12345678"));
+        assert_eq!(docs[0].doi.as_deref(), Some("10.1000/test.doi"));
+        assert_eq!(
+            docs[0].url.as_deref(),
+            Some("https://pubmed.ncbi.nlm.nih.gov/12345678/")
+        );
     }
 }

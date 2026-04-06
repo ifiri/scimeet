@@ -9,13 +9,8 @@ pub struct ArxivSource {
 }
 
 impl ArxivSource {
-    pub fn new(timeout_secs: u64) -> Result<Self, ScimeetError> {
-        let client = Client::builder()
-            .timeout(std::time::Duration::from_secs(timeout_secs))
-            .user_agent("scimeet/0.1")
-            .build()
-            .map_err(|e| ScimeetError::Http(e.to_string()))?;
-        Ok(Self { client })
+    pub fn new(client: Client) -> Self {
+        Self { client }
     }
 }
 
@@ -90,5 +85,40 @@ impl SourceAdapter for ArxivSource {
         }
         let xml = res.text().await.map_err(|e| ScimeetError::Http(e.to_string()))?;
         parse_arxiv_atom(&xml)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use scimeet_core::SourceKind;
+
+    const SAMPLE_ATOM: &str = r#"<?xml version="1.0"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <entry>
+    <id>http://arxiv.org/abs/1234.5678v1</id>
+    <title>  Sample Paper Title  </title>
+    <summary>Abstract line one.</summary>
+    <published>2021-06-01T00:00:00Z</published>
+  </entry>
+</feed>
+"#;
+
+    #[test]
+    fn parse_arxiv_atom_extracts_entry() {
+        let docs = parse_arxiv_atom(SAMPLE_ATOM).unwrap();
+        assert_eq!(docs.len(), 1);
+        assert_eq!(docs[0].id.0, "arxiv:1234.5678v1");
+        assert_eq!(docs[0].source, SourceKind::Arxiv);
+        assert_eq!(docs[0].title, "Sample Paper Title");
+        assert_eq!(docs[0].abstract_text, "Abstract line one.");
+        assert_eq!(
+            docs[0].url.as_deref(),
+            Some("http://arxiv.org/abs/1234.5678v1")
+        );
+        assert_eq!(
+            docs[0].published.as_deref(),
+            Some("2021-06-01T00:00:00Z")
+        );
     }
 }

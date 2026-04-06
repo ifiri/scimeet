@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::path::Path;
 use std::sync::Arc;
+use tracing::instrument;
 
 pub struct VectorStore {
     table: Arc<Table>,
@@ -145,6 +146,7 @@ fn map_err(e: impl std::fmt::Display) -> ScimeetError {
 }
 
 impl VectorStore {
+    #[instrument(skip(path), fields(dim = dim))]
     pub async fn open(path: &Path, dim: usize) -> Result<Self, ScimeetError> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(ScimeetError::Io)?;
@@ -263,6 +265,7 @@ impl VectorStore {
         Ok(n)
     }
 
+    #[instrument(skip(self, query), fields(k = k, dim = self.dim))]
     pub async fn search(
         &self,
         query: &[f32],
@@ -322,6 +325,7 @@ impl VectorStore {
         Ok(out)
     }
 
+    #[instrument(skip(self))]
     pub async fn create_vector_index(&self) -> Result<(), ScimeetError> {
         self.table
             .create_index(&["vector"], Index::Auto)
@@ -333,5 +337,33 @@ impl VectorStore {
 
     pub fn dim(&self) -> usize {
         self.dim
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use scimeet_core::{ChunkMeta, DocumentId, SourceKind};
+
+    #[tokio::test]
+    async fn round_trip_search() {
+        let dir = tempfile::tempdir().unwrap();
+        let dim = 8usize;
+        let store = VectorStore::open(dir.path(), dim).await.unwrap();
+        let meta = ChunkMeta {
+            document_id: DocumentId("test:1".to_string()),
+            title: "t".to_string(),
+            source: SourceKind::PubMed,
+            doi: None,
+            pmid: None,
+            url: None,
+            chunk_index: 0,
+        };
+        let emb: Vec<f32> = (0..dim).map(|i| (i as f32) * 0.01).collect();
+        store.upsert_chunk("chunk text", &meta, &emb).await.unwrap();
+        let q = emb.clone();
+        let hits = store.search(&q, 5).await.unwrap();
+        assert!(!hits.is_empty());
+        assert!(hits[0].score > 0.0);
     }
 }

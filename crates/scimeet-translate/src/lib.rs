@@ -27,3 +27,36 @@ fn should_translate_inner(text: &str) -> bool {
         None => true,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use scimeet_core::ScimeetConfig;
+
+    #[test]
+    fn should_translate_query_respects_flag_off() {
+        let mut c = ScimeetConfig::defaults();
+        c.translate_on_query = false;
+        assert!(!should_translate_query(&c, "Bonjour le monde entier"));
+    }
+
+    #[test]
+    fn should_translate_query_skips_empty() {
+        let c = ScimeetConfig::defaults();
+        assert!(!should_translate_query(&c, "   "));
+    }
+
+    #[test]
+    fn should_translate_query_english_long_text() {
+        let c = ScimeetConfig::defaults();
+        let t = "The quick brown fox jumps over the lazy dog. Repeated for detection.";
+        assert!(!should_translate_query(&c, t));
+    }
+
+    #[test]
+    fn should_translate_query_non_english() {
+        let c = ScimeetConfig::defaults();
+        let t = "Der schnelle braune Fuchs springt über den faulen Hund. Noch ein Satz auf Deutsch.";
+        assert!(should_translate_query(&c, t));
+    }
+}

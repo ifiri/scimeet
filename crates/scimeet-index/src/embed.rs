@@ -1,6 +1,7 @@
 use reqwest::Client;
 use scimeet_core::{ScimeetConfig, ScimeetError};
 use serde::{Deserialize, Serialize};
+use tracing::instrument;
 
 pub struct OllamaEmbeddings {
     client: Client,
@@ -19,14 +20,11 @@ struct EmbedResponse {
 }
 
 impl OllamaEmbeddings {
-    pub fn new(config: ScimeetConfig) -> Result<Self, ScimeetError> {
-        let client = Client::builder()
-            .timeout(std::time::Duration::from_secs(config.request_timeout_secs))
-            .build()
-            .map_err(|e| ScimeetError::Http(e.to_string()))?;
-        Ok(Self { client, config })
+    pub fn new(config: ScimeetConfig, client: Client) -> Self {
+        Self { client, config }
     }
 
+    #[instrument(skip_all, fields(model = %self.config.embed_model))]
     pub async fn embed(&self, text: &str) -> Result<Vec<f32>, ScimeetError> {
         let url = format!(
             "{}/api/embeddings",
@@ -67,5 +65,19 @@ impl OllamaEmbeddings {
             out.push(self.embed(t).await?);
         }
         Ok(out)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use reqwest::Client;
+    use scimeet_core::ScimeetConfig;
+
+    #[tokio::test]
+    async fn embed_batch_empty_no_requests() {
+        let emb = OllamaEmbeddings::new(ScimeetConfig::defaults(), Client::new());
+        let out = emb.embed_batch(&[]).await.unwrap();
+        assert!(out.is_empty());
     }
 }

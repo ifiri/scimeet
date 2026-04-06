@@ -3,6 +3,7 @@ use scimeet_core::{ScimeetConfig, ScimeetError};
 use scimeet_index::{IndexedChunk, OllamaEmbeddings, VectorStore};
 use scimeet_translate::OllamaTranslator;
 use serde::{Deserialize, Serialize};
+use tracing::instrument;
 
 pub struct RagEngine {
     config: ScimeetConfig,
@@ -35,21 +36,18 @@ struct ChatResponseMessage {
 }
 
 impl RagEngine {
-    pub fn new(config: ScimeetConfig) -> Result<Self, ScimeetError> {
-        let client = Client::builder()
-            .timeout(std::time::Duration::from_secs(config.request_timeout_secs))
-            .build()
-            .map_err(|e| ScimeetError::Http(e.to_string()))?;
-        let embeddings = OllamaEmbeddings::new(config.clone())?;
-        let translator = OllamaTranslator::new(config.clone())?;
-        Ok(Self {
+    pub fn new(config: ScimeetConfig, client: Client) -> Self {
+        let embeddings = OllamaEmbeddings::new(config.clone(), client.clone());
+        let translator = OllamaTranslator::new(config.clone(), client.clone());
+        Self {
             config,
             embeddings,
             translator,
             client,
-        })
+        }
     }
 
+    #[instrument(skip(self))]
     pub async fn embed_query(&self, question: &str) -> Result<Vec<f32>, ScimeetError> {
         let text = if scimeet_translate::should_translate_query(&self.config, question) {
             match self.translator.to_english(question).await {
@@ -65,6 +63,7 @@ impl RagEngine {
         self.embeddings.embed(&text).await
     }
 
+    #[instrument(skip(self, store))]
     pub async fn retrieve(
         &self,
         store: &VectorStore,
@@ -85,6 +84,7 @@ impl RagEngine {
         self.answer_from_hits(question, &hits).await
     }
 
+    #[instrument(skip(self, hits))]
     pub async fn answer_from_hits(
         &self,
         question: &str,
@@ -156,4 +156,46 @@ fn build_context(hits: &[IndexedChunk]) -> String {
         ));
     }
     s
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use scimeet_core::{ChunkMeta, DocumentId, SourceKind};
+
+    fn sample_hit(text: &str, score: f32) -> IndexedChunk {
+        IndexedChunk {
+            id: "id1".to_string(),
+            text: text.to_string(),
+            meta: ChunkMeta {
+                document_id: DocumentId("d:1".to_string()),
+                title: "T".to_string(),
+                source: SourceKind::PubMed,
+                doi: Some("10.1/x".to_string()),
+                pmid: Some("1".to_string()),
+                url: Some("https://x".to_string()),
+                chunk_index: 0,
+            },
+            score,
+        }
+    }
+
+    #[test]
+    fn build_context_includes_scores_and_text() {
+        let hits = vec![
+            sample_hit("chunk body one", 0.9),
+            sample_hit("chunk body two", 0.5),
+        ];
+        let ctx = build_context(&hits);
+        assert!(ctx.contains("score=0.900"));
+        assert!(ctx.contains("chunk body one"));
+        assert!(ctx.contains("PMID: 1"));
+        assert!(ctx.contains("DOI: 10.1/x"));
+        assert!(ctx.contains("URL: https://x"));
+    }
+
+    #[test]
+    fn build_context_empty() {
+        assert_eq!(build_context(&[]), "");
+    }
 }

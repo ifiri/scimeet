@@ -10,8 +10,12 @@ name = "scimeet"
 path = "src/main.rs"
 
 [dependencies]
+anyhow = "1"
 clap = { version = "4", features = ["derive"] }
+dotenvy = "0.15"
 scimeet-core = { path = "../scimeet-core" }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 scimeet-index = { path = "../scimeet-index" }
 scimeet-ingest = { path = "../scimeet-ingest" }
 scimeet-rag = { path = "../scimeet-rag" }

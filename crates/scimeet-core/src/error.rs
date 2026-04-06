@@ -10,6 +10,8 @@ pub enum ScimeetError {
     Json(#[from] serde_json::Error),
     #[error("lancedb: {0}")]
     LanceDb(String),
+    #[error("config: {0}")]
+    Config(String),
     #[error("ollama: {0}")]
     Ollama(String),
     #[error("parse: {0}")]

@@ -67,3 +67,41 @@ pub fn chunk_document(doc: &Document) -> Vec<(String, ChunkMeta)> {
     }
     out
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use scimeet_core::{DocumentId, SourceKind};
+
+    fn sample_doc(title: &str, body: &str) -> Document {
+        Document {
+            id: DocumentId("test:1".to_string()),
+            source: SourceKind::PubMed,
+            title: title.to_string(),
+            abstract_text: body.to_string(),
+            doi: None,
+            pmid: Some("1".to_string()),
+            url: None,
+            published: None,
+        }
+    }
+
+    #[test]
+    fn chunk_empty_abstract_uses_title() {
+        let doc = sample_doc("Only title", "");
+        let chunks = chunk_document(&doc);
+        assert_eq!(chunks.len(), 1);
+        assert!(chunks[0].0.contains("Only title"));
+    }
+
+    #[test]
+    fn chunk_splits_paragraphs() {
+        let doc = sample_doc(
+            "T",
+            "First paragraph.\n\nSecond paragraph.\n\nThird here.",
+        );
+        let chunks = chunk_document(&doc);
+        assert!(chunks.len() >= 1);
+        assert!(chunks[0].0.contains("Title: T"));
+    }
+}

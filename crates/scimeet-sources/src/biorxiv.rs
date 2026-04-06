@@ -26,23 +26,19 @@ struct BiorxivItem {
 }
 
 impl BiorxivMedrxivSource {
-    pub fn new_medrxiv(timeout_secs: u64) -> Result<Self, ScimeetError> {
-        Self::with_server("medrxiv", timeout_secs)
+    pub fn new_medrxiv(client: Client) -> Self {
+        Self::with_server(client, "medrxiv")
     }
 
-    pub fn new_biorxiv(timeout_secs: u64) -> Result<Self, ScimeetError> {
-        Self::with_server("biorxiv", timeout_secs)
+    pub fn new_biorxiv(client: Client) -> Self {
+        Self::with_server(client, "biorxiv")
     }
 
-    fn with_server(server: &str, timeout_secs: u64) -> Result<Self, ScimeetError> {
-        let client = Client::builder()
-            .timeout(std::time::Duration::from_secs(timeout_secs))
-            .build()
-            .map_err(|e| ScimeetError::Http(e.to_string()))?;
-        Ok(Self {
+    fn with_server(client: Client, server: &str) -> Self {
+        Self {
             client,
             server: server.to_string(),
-        })
+        }
     }
 
     fn matches_query(text: &str, query: &str) -> bool {
@@ -104,5 +100,30 @@ impl SourceAdapter for BiorxivMedrxivSource {
             }
         }
         Ok(out)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::BiorxivMedrxivSource;
+
+    #[test]
+    fn matches_query_requires_words_over_two_chars() {
+        assert!(BiorxivMedrxivSource::matches_query(
+            "diabetes mellitus treatment outcomes",
+            "diabetes treatment"
+        ));
+        assert!(!BiorxivMedrxivSource::matches_query(
+            "diabetes mellitus treatment outcomes",
+            "diabetes oncology"
+        ));
+    }
+
+    #[test]
+    fn matches_query_ignores_short_query_words() {
+        assert!(BiorxivMedrxivSource::matches_query(
+            "unrelated text",
+            "a b c"
+        ));
     }
 }

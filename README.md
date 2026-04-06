@@ -26,6 +26,21 @@ cargo build --release
 
 Binary: `target/release/scimeet` (or `target\release\scimeet.exe` on Windows).
 
+## Configuration
+
+The **`scimeet-cli`** binary resolves settings in this order: **built-in defaults** (embedded TOML string in the CLI crate only) → optional **`scimeet.toml`** in the current directory, or **`--config path`** → **environment** (including a local **`.env`** file loaded at startup) → **CLI flags** (`--data-dir`, `--ollama`, …).
+
+Library crates (`scimeet-core`, etc.) only expose `ScimeetConfig` and `from_toml_str`; they do not define defaults or read the environment. See [`.env.example`](.env.example) for variable names; copy it to `.env` to customize.
+
+## Logging
+
+The CLI uses [`tracing`](https://docs.rs/tracing) with `RUST_LOG` (see [`tracing-subscriber` env filter](https://docs.rs/tracing-subscriber/latest/tracing_subscriber/filter/struct.EnvFilter.html)). Examples:
+
+```bash
+RUST_LOG=info ./target/release/scimeet ask --question "What trials compare SGLT2 inhibitors?"
+RUST_LOG=scimeet_cli=debug,scimeet_rag=debug ./target/release/scimeet ingest --query "cancer" --sources pubmed --max 5
+```
+
 ## Ingestion
 
 ```bash
@@ -51,12 +66,19 @@ Retrieved chunks (score, PMID, DOI) are printed first, then the model answer.
 
 ## Environment variables
 
+Read and validated only by the **`scimeet`** binary (after optional `.env`). See [`.env.example`](.env.example) for a full list.
+
 | Variable | Purpose |
 |----------|---------|
-| `OLLAMA_HOST` | Ollama base URL (default `http://127.0.0.1:11434`) |
-| `NCBI_API_KEY` | NCBI key for E-utilities |
-| `SCIMEET_DATA_DIR` | Data directory instead of `./data` |
-| `SCIMEET_EMBED_DIM` | Embedding dimension (default `768`) |
+| `OLLAMA_HOST` | Ollama base URL (overrides `SCIMEET_OLLAMA_BASE` if both set) |
+| `SCIMEET_OLLAMA_BASE` | Ollama base URL if `OLLAMA_HOST` unset |
+| `SCIMEET_EMBED_MODEL`, `SCIMEET_CHAT_MODEL`, `SCIMEET_TRANSLATE_MODEL` | Model names |
+| `SCIMEET_TRANSLATE_ON_QUERY`, `SCIMEET_TRANSLATE_ON_INGEST`, `SCIMEET_TRANSLATE_FALLBACK_TO_ORIGINAL` | `true`/`false`/`1`/`0` |
+| `SCIMEET_DATA_DIR` | Data directory |
+| `SCIMEET_EMBED_DIM` | Embedding width (positive integer) |
+| `SCIMEET_REQUEST_TIMEOUT_SECS`, `SCIMEET_CONNECT_TIMEOUT_SECS` | HTTP timeouts (positive seconds) |
+| `SCIMEET_HTTP_POOL_MAX_IDLE_PER_HOST`, `SCIMEET_HTTP_POOL_IDLE_TIMEOUT_SECS`, `SCIMEET_HTTP_USER_AGENT` | HTTP client |
+| `NCBI_API_KEY` or `SCIMEET_NCBI_API_KEY` | PubMed E-utilities key |
 
 ## Limitations
 
