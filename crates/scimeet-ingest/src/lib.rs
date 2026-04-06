@@ -31,3 +31,62 @@ pub async fn maybe_translate_chunk(
         Ok(text.to_string())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use reqwest::Client;
+    use scimeet_core::{Document, DocumentId, ScimeetConfig, SourceKind};
+
+    #[test]
+    fn document_fingerprint_stable() {
+        let doc = Document {
+            id: DocumentId("pmid:1".to_string()),
+            source: SourceKind::PubMed,
+            title: "T".to_string(),
+            abstract_text: "A".to_string(),
+            doi: None,
+            pmid: Some("1".to_string()),
+            url: None,
+            published: None,
+        };
+        let a = document_fingerprint(&doc);
+        let b = document_fingerprint(&doc);
+        assert_eq!(a, b);
+        assert_eq!(a.len(), 64);
+    }
+
+    #[test]
+    fn document_fingerprint_changes_with_content() {
+        let d1 = Document {
+            id: DocumentId("x".to_string()),
+            source: SourceKind::PubMed,
+            title: "same".to_string(),
+            abstract_text: "one".to_string(),
+            doi: None,
+            pmid: None,
+            url: None,
+            published: None,
+        };
+        let d2 = Document {
+            id: DocumentId("x".to_string()),
+            source: SourceKind::PubMed,
+            title: "same".to_string(),
+            abstract_text: "two".to_string(),
+            doi: None,
+            pmid: None,
+            url: None,
+            published: None,
+        };
+        assert_ne!(document_fingerprint(&d1), document_fingerprint(&d2));
+    }
+
+    #[tokio::test]
+    async fn maybe_translate_passes_through_when_ingest_off() {
+        let mut c = ScimeetConfig::defaults();
+        c.translate_on_ingest = false;
+        let translator = OllamaTranslator::new(c.clone(), Client::new());
+        let out = maybe_translate_chunk(&c, &translator, "no network").await.unwrap();
+        assert_eq!(out, "no network");
+    }
+}

@@ -4409,9 +4409,11 @@ dependencies = [
 name = "scimeet-ingest"
 version = "0.1.0"
 dependencies = [
+ "reqwest",
  "scimeet-core",
  "scimeet-translate",
  "sha2",
+ "tokio",
 ]
 
 [[package]]

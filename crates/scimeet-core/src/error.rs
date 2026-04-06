@@ -19,3 +19,16 @@ pub enum ScimeetError {
     #[error("{0}")]
     Other(String),
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn display_includes_variant() {
+        let e = ScimeetError::Ollama("bad".to_string());
+        assert!(e.to_string().contains("bad"));
+        let e = ScimeetError::Config("x".to_string());
+        assert!(e.to_string().contains("config"));
+    }
+}

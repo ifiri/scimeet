@@ -192,4 +192,18 @@ mod tests {
             None => std::env::remove_var("SCIMEET_EMBED_DIM"),
         }
     }
+
+    #[test]
+    fn apply_env_overrides_rejects_invalid_bool() {
+        let _g = ENV_MUTEX.lock().unwrap();
+        let prev = std::env::var("SCIMEET_TRANSLATE_ON_QUERY").ok();
+        std::env::set_var("SCIMEET_TRANSLATE_ON_QUERY", "maybe");
+        let mut c = ScimeetConfig::defaults();
+        let err = apply_env_overrides(&mut c).unwrap_err();
+        assert!(err.to_string().contains("SCIMEET_TRANSLATE_ON_QUERY"));
+        match prev {
+            Some(v) => std::env::set_var("SCIMEET_TRANSLATE_ON_QUERY", v),
+            None => std::env::remove_var("SCIMEET_TRANSLATE_ON_QUERY"),
+        }
+    }
 }

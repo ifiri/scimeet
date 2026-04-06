@@ -35,3 +35,33 @@ pub struct ChunkMeta {
     pub url: Option<String>,
     pub chunk_index: usize,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn source_kind_serde_roundtrip() {
+        let k = SourceKind::PubMed;
+        let j = serde_json::to_string(&k).unwrap();
+        let back: SourceKind = serde_json::from_str(&j).unwrap();
+        assert_eq!(k, back);
+    }
+
+    #[test]
+    fn chunk_meta_json_roundtrip() {
+        let m = ChunkMeta {
+            document_id: DocumentId("d:1".to_string()),
+            title: "t".to_string(),
+            source: SourceKind::Arxiv,
+            doi: None,
+            pmid: Some("9".to_string()),
+            url: None,
+            chunk_index: 0,
+        };
+        let j = serde_json::to_string(&m).unwrap();
+        let back: ChunkMeta = serde_json::from_str(&j).unwrap();
+        assert_eq!(m.document_id, back.document_id);
+        assert_eq!(m.chunk_index, back.chunk_index);
+    }
+}

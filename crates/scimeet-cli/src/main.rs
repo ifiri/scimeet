@@ -199,3 +199,54 @@ async fn run_ask(
     println!("{}", ans);
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn cochrane_pubmed_query_includes_journal_filter() {
+        let q = cochrane_pubmed_query("diabetes mellitus");
+        assert!(q.starts_with("(diabetes mellitus)"));
+        assert!(q.contains("Cochrane Database of Systematic Reviews"));
+    }
+
+    #[test]
+    fn merge_global_applies_set_options() {
+        let mut c = ScimeetConfig::defaults();
+        let g = GlobalOpts {
+            config: None,
+            data_dir: Some(PathBuf::from("/tmp/scimeet-data")),
+            ollama: Some("http://example:11434".to_string()),
+            embed_model: Some("e-model".to_string()),
+            embed_dim: Some(384),
+            chat_model: Some("c-model".to_string()),
+            translate_model: Some("t-model".to_string()),
+        };
+        merge_global(&mut c, &g);
+        assert_eq!(c.data_dir, PathBuf::from("/tmp/scimeet-data"));
+        assert_eq!(c.ollama_base, "http://example:11434");
+        assert_eq!(c.embed_model, "e-model");
+        assert_eq!(c.embed_dim, 384);
+        assert_eq!(c.chat_model, "c-model");
+        assert_eq!(c.translate_model, "t-model");
+    }
+
+    #[test]
+    fn merge_global_noop_when_all_none() {
+        let mut c = ScimeetConfig::defaults();
+        let base = c.clone();
+        let g = GlobalOpts {
+            config: None,
+            data_dir: None,
+            ollama: None,
+            embed_model: None,
+            embed_dim: None,
+            chat_model: None,
+            translate_model: None,
+        };
+        merge_global(&mut c, &g);
+        assert_eq!(c, base);
+    }
+}

@@ -104,4 +104,10 @@ mod tests {
         assert!(chunks.len() >= 1);
         assert!(chunks[0].0.contains("Title: T"));
     }
+
+    #[test]
+    fn text_for_embedding_joins_title_and_body() {
+        let doc = sample_doc("Hello", "World");
+        assert_eq!(text_for_embedding(&doc), "Hello\n\nWorld");
+    }
 }

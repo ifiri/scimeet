@@ -59,4 +59,22 @@ mod tests {
         let t = "Der schnelle braune Fuchs springt über den faulen Hund. Noch ein Satz auf Deutsch.";
         assert!(should_translate_query(&c, t));
     }
+
+    #[test]
+    fn should_translate_ingest_respects_flag_off() {
+        let mut c = ScimeetConfig::defaults();
+        c.translate_on_ingest = false;
+        assert!(!should_translate_ingest(
+            &c,
+            "Der schnelle braune Fuchs springt über den faulen Hund."
+        ));
+    }
+
+    #[test]
+    fn should_translate_ingest_non_english_when_enabled() {
+        let mut c = ScimeetConfig::defaults();
+        c.translate_on_ingest = true;
+        let t = "Der schnelle braune Fuchs springt über den faulen Hund.";
+        assert!(should_translate_ingest(&c, t));
+    }
 }
